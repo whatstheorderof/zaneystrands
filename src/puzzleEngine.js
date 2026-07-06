@@ -1,6 +1,8 @@
 import { BONUS_WORDS, STORY_TEMPLATES } from "./data/storySeeds.js";
 
 const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+export const CATALOG_SIZE = 5000;
+export const TOPIC_FILTERS = ["All", "Adventure", "Mystery", "Nature", "STEM", "Food", "Cozy", "Kids"];
 const ADJACENT = [
   [-1, -1],
   [-1, 0],
@@ -56,6 +58,52 @@ export function generateDailyPuzzle({ id = todayPuzzleId(), mode = "standard" } 
     mode,
     seed: hashString(`${template.slug}:${mode}:${id}`)
   });
+}
+
+export function getPuzzleCatalog(limit = CATALOG_SIZE) {
+  return Array.from({ length: limit }, (_, id) => {
+    const template = STORY_TEMPLATES[id % STORY_TEMPLATES.length];
+    const episode = Math.floor(id / STORY_TEMPLATES.length) + 1;
+    return {
+      id,
+      episode,
+      slug: template.slug,
+      title: template.title,
+      theme: template.theme,
+      clue: template.clue,
+      badge: template.badge,
+      topic: topicForTemplate(template),
+      wordCount: template.words.length,
+      kidsWordCount: template.kidsWords.length,
+      expertWordCount: template.expertWords.length
+    };
+  });
+}
+
+export function getTopicStats(limit = CATALOG_SIZE) {
+  return getPuzzleCatalog(limit).reduce((stats, puzzle) => {
+    stats[puzzle.topic] = (stats[puzzle.topic] || 0) + 1;
+    stats.All = (stats.All || 0) + 1;
+    return stats;
+  }, {});
+}
+
+function topicForTemplate(template) {
+  const topicBySlug = {
+    "beach-day": "Adventure",
+    "midnight-museum": "Mystery",
+    "garden-rescue": "Nature",
+    "space-camp": "STEM",
+    "rainy-library": "Cozy",
+    "candy-factory": "Food",
+    "mountain-train": "Adventure",
+    "dragon-bakery": "Food",
+    "snow-day": "Cozy",
+    "jungle-radio": "Nature",
+    "robot-repair": "STEM",
+    "pirate-parade": "Kids"
+  };
+  return topicBySlug[template.slug] || "Adventure";
 }
 
 export function generatePuzzleFromInput({ title, theme, clue, spangram, words, goldenWord, size = 10 }) {

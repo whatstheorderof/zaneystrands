@@ -2,12 +2,16 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   displayWord,
+  CATALOG_SIZE,
   generateDailyPuzzle,
   generatePuzzleFromInput,
+  getPuzzleCatalog,
+  getTopicStats,
   isSamePath,
   normalizeWord,
   pathKey,
   pathToWord,
+  TOPIC_FILTERS,
   todayPuzzleId,
   validatePuzzle
 } from "./puzzleEngine.js";
@@ -23,10 +27,11 @@ const MODES = [
 const STORAGE_KEY = "zaney-strands-profile";
 
 function App() {
-  const [route, setRoute] = useState(() => (window.location.hash === "#generator" ? "generator" : "play"));
+  const [route, setRoute] = useState(() => routeFromHash());
+  const [libraryPick, setLibraryPick] = useState(null);
 
   useEffect(() => {
-    const onHash = () => setRoute(window.location.hash === "#generator" ? "generator" : "play");
+    const onHash = () => setRoute(routeFromHash());
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
@@ -34,14 +39,32 @@ function App() {
   return (
     <main className="app-shell">
       <TopBar route={route} setRoute={setRoute} />
-      {route === "generator" ? <GeneratorPage /> : <PlayPage />}
+      {route === "generator" ? (
+        <GeneratorPage />
+      ) : route === "library" ? (
+        <LibraryPage
+          onPlayPuzzle={(puzzleId) => {
+            setLibraryPick(puzzleId);
+            window.location.hash = "";
+            setRoute("play");
+          }}
+        />
+      ) : (
+        <PlayPage libraryPick={libraryPick} clearLibraryPick={() => setLibraryPick(null)} />
+      )}
     </main>
   );
 }
 
+function routeFromHash() {
+  if (window.location.hash === "#generator") return "generator";
+  if (window.location.hash === "#library") return "library";
+  return "play";
+}
+
 function TopBar({ route, setRoute }) {
   const go = (nextRoute) => {
-    window.location.hash = nextRoute === "generator" ? "generator" : "";
+    window.location.hash = nextRoute === "generator" ? "generator" : nextRoute === "library" ? "library" : "";
     setRoute(nextRoute);
   };
 
@@ -59,6 +82,13 @@ function TopBar({ route, setRoute }) {
           Daily
         </button>
         <button
+          className={route === "library" ? "active nav-button" : "nav-button"}
+          type="button"
+          onClick={() => go("library")}
+        >
+          Library
+        </button>
+        <button
           className={route === "generator" ? "active nav-button" : "nav-button"}
           type="button"
           onClick={() => go("generator")}
@@ -70,7 +100,7 @@ function TopBar({ route, setRoute }) {
   );
 }
 
-function PlayPage() {
+function PlayPage({ libraryPick, clearLibraryPick }) {
   const [mode, setMode] = useState("standard");
   const [dailyOffset, setDailyOffset] = useState(0);
   const [foundKeys, setFoundKeys] = useState([]);
@@ -83,8 +113,8 @@ function PlayPage() {
   const [profile, setProfile] = useLocalProfile();
 
   const puzzle = useMemo(
-    () => generateDailyPuzzle({ id: todayPuzzleId() + dailyOffset, mode }),
-    [dailyOffset, mode]
+    () => generateDailyPuzzle({ id: libraryPick ?? todayPuzzleId() + dailyOffset, mode }),
+    [dailyOffset, libraryPick, mode]
   );
 
   const answerEntries = puzzle.entries.filter((entry) => entry.kind === "answer");
@@ -179,7 +209,7 @@ function PlayPage() {
     <section className="game-layout">
       <aside className="side-rail">
         <section className="mode-panel panel">
-          <p className="section-label">Daily puzzle</p>
+          <p className="section-label">{libraryPick == null ? "Daily puzzle" : `Library puzzle #${libraryPick + 1}`}</p>
           <h1>{puzzle.title}</h1>
           <p className="clue-text">{puzzle.clue}</p>
           <div className="segmented-control" role="tablist" aria-label="Puzzle mode">
@@ -199,6 +229,11 @@ function PlayPage() {
             <span>{puzzle.estimatedSolveTime} min</span>
             <span>{Math.round(puzzle.completionRate * 100)}% finish</span>
           </div>
+          {libraryPick != null && (
+            <button className="return-daily" type="button" onClick={clearLibraryPick}>
+              Return to daily
+            </button>
+          )}
         </section>
 
         <section className="panel profile-panel">
@@ -267,6 +302,103 @@ function PlayPage() {
           <p>You unlocked the {puzzle.badge} badge and completed today's hidden story.</p>
           <button type="button" onClick={share}>Share this run</button>
         </div>
+      </div>
+    </section>
+  );
+}
+
+function LibraryPage({ onPlayPuzzle }) {
+  const [topic, setTopic] = useState("All");
+  const [query, setQuery] = useState("");
+  const [page, setPage] = useState(0);
+  const catalog = useMemo(() => getPuzzleCatalog(CATALOG_SIZE), []);
+  const topicStats = useMemo(() => getTopicStats(CATALOG_SIZE), []);
+  const pageSize = 36;
+  const normalizedQuery = query.trim().toLowerCase();
+  const filtered = catalog.filter((puzzle) => {
+    const matchesTopic = topic === "All" || puzzle.topic === topic;
+    const matchesQuery =
+      normalizedQuery === "" ||
+      `${puzzle.title} ${puzzle.theme} ${puzzle.clue} ${puzzle.topic}`.toLowerCase().includes(normalizedQuery);
+    return matchesTopic && matchesQuery;
+  });
+  const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const safePage = Math.min(page, pageCount - 1);
+  const visiblePuzzles = filtered.slice(safePage * pageSize, safePage * pageSize + pageSize);
+
+  useEffect(() => {
+    setPage(0);
+  }, [topic, query]);
+
+  return (
+    <section className="library-layout">
+      <div className="library-hero panel">
+        <div>
+          <p className="section-label">Topic library</p>
+          <h1>Browse 5,000+ finishable story puzzles.</h1>
+          <p>
+            The daily puzzle is only one doorway. The catalog rotates story templates across topics, modes, and
+            numbered episodes so players can choose what they feel like solving.
+          </p>
+        </div>
+        <div className="library-count">
+          <strong>{CATALOG_SIZE.toLocaleString()}+</strong>
+          <span>validated puzzle IDs</span>
+        </div>
+      </div>
+
+      <div className="library-tools panel">
+        <label>
+          Search topics
+          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Beach, robot, bakery..." />
+        </label>
+        <div className="topic-filter" aria-label="Topic filters">
+          {TOPIC_FILTERS.map((filter) => (
+            <button
+              className={topic === filter ? "selected" : ""}
+              key={filter}
+              type="button"
+              onClick={() => setTopic(filter)}
+            >
+              {filter}
+              <span>{(topicStats[filter] || 0).toLocaleString()}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="library-results">
+        {visiblePuzzles.map((puzzle) => (
+          <article className="library-card panel" key={puzzle.id}>
+            <p className="section-label">{puzzle.topic} / Episode {puzzle.episode}</p>
+            <h2>{puzzle.title}</h2>
+            <p>{puzzle.clue}</p>
+            <div className="library-meta">
+              <span>{puzzle.wordCount} words</span>
+              <span>{puzzle.expertWordCount} expert</span>
+              <span>{puzzle.badge}</span>
+            </div>
+            <button type="button" onClick={() => onPlayPuzzle(puzzle.id)}>
+              Play puzzle #{puzzle.id + 1}
+            </button>
+          </article>
+        ))}
+      </div>
+
+      <div className="pager">
+        <button type="button" disabled={safePage === 0} onClick={() => setPage((current) => Math.max(0, current - 1))}>
+          Previous
+        </button>
+        <span>
+          Page {safePage + 1} of {pageCount}
+        </span>
+        <button
+          type="button"
+          disabled={safePage >= pageCount - 1}
+          onClick={() => setPage((current) => Math.min(pageCount - 1, current + 1))}
+        >
+          Next
+        </button>
       </div>
     </section>
   );
